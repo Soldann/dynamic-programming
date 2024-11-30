@@ -1,0 +1,11 @@
+name: dpoc_pe
+channels:
+  - defaults
+dependencies:
+  - pip=24.2
+  - python=3.11
+  - pip:
+      - matplotlib==3.8.0
+      - numpy==1.24.4
+      - scipy==1.11.3
+prefix: /opt/anaconda3/envs/dpoc_pe
