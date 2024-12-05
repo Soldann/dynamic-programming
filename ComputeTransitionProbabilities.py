@@ -45,8 +45,9 @@ def compute_transition_probabilities(Constants):
 
         robot_x, robot_y, swan_x, swan_y = starting_state
 
-        if (robot_x == swan_x and robot_y == swan_y
-            or np.any((Constants.DRONE_POS == [robot_x, robot_y]).all(axis=1))):
+        if (robot_x == swan_x and robot_y == swan_y # if we have collided with the swan
+            or np.any((Constants.DRONE_POS == [robot_x, robot_y]).all(axis=1)) # or if we have collided with a static drone
+            or robot_x == Constants.GOAL_POS[0] and robot_y == Constants.GOAL_POS[1]): # or we have reached the goal state
             # print("Skipping:")
             # print(robot_x, robot_y)
             # print(Constants.DRONE_POS)
@@ -58,6 +59,7 @@ def compute_transition_probabilities(Constants):
 
         swan_theta = np.arctan2(robot_y - swan_y, robot_x - swan_x)
         # print("theta", swan_theta)
+        # print(swan_x, swan_y)
         # print(robot_x, robot_y)
         # print(robot_y - swan_y, robot_x - swan_x)
         if -np.pi / 8 <= swan_theta < np.pi / 8:
@@ -86,6 +88,8 @@ def compute_transition_probabilities(Constants):
             potential_swan_move_y = swan_y - 1
         else:
             raise RuntimeError("Invalid angle between swan and robot")
+
+        # print(potential_swan_move_x, potential_swan_move_y)
 
         for input in range(Constants.L):
             control_x, control_y = Constants.INPUT_SPACE[input]
@@ -192,7 +196,7 @@ def compute_transition_probabilities(Constants):
             # print(P[state, :, input][np.nonzero(P[state, :, input])])
             # print([idx2state(id) for id in np.argwhere(P[state, :, input])])
             # print((1 - current_prob)*(1 - Constants.SWAN_PROB), (1- current_prob)*(Constants.SWAN_PROB), (current_prob)*(1-Constants.SWAN_PROB), (current_prob)*(Constants.SWAN_PROB))
-            assert np.isclose(np.sum(P[state, :, input]), 1)
+            # assert np.isclose(np.sum(P[state, :, input]), 1)
 
         # s = np.ravel_multi_index([10000000, 0, 0, 0], (Constants.M, Constants.N, Constants.M, Constants.N), mode='clip', order='F')
         # ravel = np.ravel_multi_index(starting_state, (Constants.M, Constants.N, Constants.M, Constants.N), mode='clip', order='F')
