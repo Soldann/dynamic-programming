@@ -19,7 +19,7 @@
 
 import numpy as np
 from utils import *
-
+import SuperFunction
 
 def compute_transition_probabilities(Constants):
     """Computes the transition probability matrix P.
@@ -37,7 +37,8 @@ def compute_transition_probabilities(Constants):
         np.array: Transition probability matrix of shape (K,K,L).
     """
     P = np.zeros((Constants.K, Constants.K, Constants.L))
-
+    print(SuperFunction.data)
+    SuperFunction.data += 1
     # TODO fill the transition probability matrix P here
 
     for state in range(Constants.K):
