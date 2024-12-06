@@ -51,6 +51,19 @@ def solution(P, Q, Constants):
     J_opt = np.zeros(Constants.K)
     u_opt = np.zeros(Constants.K)
 
+    value_func = np.zeros(Constants.K)
+    while True:
+        max_diff = 0
+        for state in range(len(value_func)):
+            newval = np.min(Q[state,:] + np.sum(P[state,:,:]*np.tile(value_func,(9,1)).T, axis=0))
+            diff = np.abs(newval - value_func[state])
+            max_diff = max(diff, max_diff)
+            value_func[state] = newval
+
+        if max_diff <= 1e-5:
+            break
+    
+    J_opt = value_func
     # TODO implement Value Iteration, Policy Iteration,
     #      Linear Programming or a combination of these
 
