@@ -51,7 +51,13 @@ def solution(P, Q, Constants):
     J_opt = np.zeros(Constants.K)
     u_opt = np.zeros(Constants.K)
 
-    # TODO implement Value Iteration, Policy Iteration,
-    #      Linear Programming or a combination of these
+    # Value iteration vanilla
+    J_opt_new = np.min(Q + np.sum(P * J_opt.reshape(1, -1, 1), axis=1), axis=1)
+    i = 0
+    while not np.allclose(J_opt, J_opt_new, rtol=1e-5, atol=1e-8):
+        J_opt = J_opt_new
+        J_opt_new = np.min(Q + np.sum(P * J_opt.reshape(1, -1, 1), axis=1), axis=1)
+        i += 1
 
     return J_opt, u_opt
+
