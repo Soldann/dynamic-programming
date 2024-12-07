@@ -1,1 +1,8 @@
 tests/
+
+# Ignoring all the files from profiling
+*.prof
+profile_stats*
+
+# Ignoring all the files in __pycache__
+__pycache__/
