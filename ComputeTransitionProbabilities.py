@@ -36,6 +36,9 @@ def compute_transition_probabilities(Constants):
     Returns:
         np.array: Transition probability matrix of shape (K,K,L).
     """
+    SuperFunction.ComputeValues(Constants)
+    return SuperFunction.P
+
     P = np.zeros((Constants.K, Constants.K, Constants.L))
     print(SuperFunction.data)
     SuperFunction.data += 1
