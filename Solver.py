@@ -20,6 +20,7 @@
 
 import numpy as np
 from utils import *
+from collections import deque
 
 def get_neighbours() -> np.array:
     """
@@ -29,9 +30,10 @@ def get_neighbours() -> np.array:
     ### Returns
     - np.array() dtype int
         - Each of the K rows represents a current postiion x_k. Each row
-          contains 8 elements that are the approximate neighbours: nodes
+          contains 4 elements that are the approximate neighbours: nodes
           x_k-1 that could have been used to transition to node x_k. When
-          these nodes would be outside the grid, np.nan is inserted.
+          these nodes would be outside the grid or they are occupied by 
+          a statinoary drone, np.nan is inserted.
     """
 
     # An array of shape (n*m x 8): each row stands for a drone state, the 
@@ -45,16 +47,66 @@ def get_neighbours() -> np.array:
     padded_indices = np.pad(indices, pad_width=1, mode='constant', constant_values=-1)
     # Collect the 8 neighbors using slicing
     neighbours = np.stack([
-        padded_indices[:-2, :-2], padded_indices[:-2, 1:-1], padded_indices[:-2, 2:],
+        padded_indices[:-2, 1:-1],
         padded_indices[1:-1, :-2], padded_indices[1:-1, 2:],
-        padded_indices[2:, :-2],  padded_indices[2:, 1:-1], padded_indices[2:, 2:]
-    ], axis=-1).reshape(-1, 8)
+        padded_indices[2:, 1:-1],
+    ], axis=-1).reshape(-1, 4)
     # replace -1 by np.nan:
     neighbours = np.where(neighbours == -1, np.nan, neighbours)
 
     # The grid positions with stationary drones should not be available neighbours for 
     # any grid position
     drone_pos = np.ravel_multi_index(Constants.DRONE_POS.T, (Constants.N, Constants.M))
+    neighbours = np.where(np.isin(neighbours, drone_pos), np.nan, neighbours)
+
+    return neighbours
+
+
+def bfs_policy() -> np.array: 
+    """
+    Run a bfs traversal and return a jumpstart policy neglecting the sawn, 
+    the current and the stochastic transitions
+
+    ### Returns
+    - np.array, dtype int
+        - A map from the current state to the control input that will
+          (in an unweighted shortest path problem) lead the path to the 
+          goal
+    """
+
+    # Initialise datastructure for BFS traversal
+    g = np.ravel_multi_index(Constants.GOAL_POS, (Constants.N, Constants.M))
+    visited = np.zeros(Constants.N * Constants.M).astype("bool")
+    visited[g] = True       # Boolean array: True where index was visited
+    queue = deque((g,))     # The queue as a deque initialised with the goal
+                            # Lookup table for the policy (init -1):
+    policy = -1 * np.ones(Constants.N * Constants.M)
+    neighbours = get_neighbours()
+    actions = np.array([1, 5, 3, 7])  # Actions S, R, L, N
+
+    # BFS traversal
+    while bool(queue):      # While the queue is not empty
+
+        i = queue.pop()     # The current position index i
+
+        # Setting the policy's action in the neighbour nodes s.t. the drone
+        # moves towards the BFS parent
+        nan_mask = ~np.isnan(neighbours[i])  # Mask of genuine neighbours
+                                             # Genuine neighbours of i
+        i_dash = neighbours[i][nan_mask].astype("int")
+        a = actions[nan_mask]                # Genuine actions at i
+        nv_mask = ~visited[i_dash]           # Mask of non-visited i_dash
+        i_dash_nv = i_dash[nv_mask]          # Non-visited i_dash
+        a_nv = a[nv_mask]                    # Actions for the i_dash_nv
+        policy[i_dash_nv] = a_nv             # Hence: actions at those indices
+
+        # Marking the neighbours as visited
+        visited[i_dash_nv] = True
+
+        # Inserting the non-visited neighbours into the queue
+        queue.extendleft(i_dash_nv)
+
+    return policy
 
 
 def solution(P, Q, Constants):
@@ -97,4 +149,5 @@ def solution(P, Q, Constants):
     return J_opt, u_opt
 
 if __name__ == "__main__":
-    get_neighbours(4,4)
+    p = bfs_policy()
+    print("Yippie!")
