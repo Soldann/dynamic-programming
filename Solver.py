@@ -21,6 +21,7 @@
 import numpy as np
 from utils import *
 from collections import deque
+from matplotlib import pyplot as plt
 
 def get_neighbours() -> np.array:
     """
@@ -56,7 +57,8 @@ def get_neighbours() -> np.array:
 
     # The grid positions with stationary drones should not be available neighbours for 
     # any grid position
-    drone_pos = np.ravel_multi_index(Constants.DRONE_POS.T, (Constants.N, Constants.M))
+    drone_pos = np.ravel_multi_index(np.flip(Constants.DRONE_POS, axis=1).T, 
+                                     (Constants.N, Constants.M))
     neighbours = np.where(np.isin(neighbours, drone_pos), np.nan, neighbours)
 
     return neighbours
@@ -75,14 +77,14 @@ def bfs_policy() -> np.array:
     """
 
     # Initialise datastructure for BFS traversal
-    g = np.ravel_multi_index(Constants.GOAL_POS, (Constants.N, Constants.M))
+    g = np.ravel_multi_index(np.flip(Constants.GOAL_POS), (Constants.N, Constants.M))
     visited = np.zeros(Constants.N * Constants.M).astype("bool")
     visited[g] = True       # Boolean array: True where index was visited
     queue = deque((g,))     # The queue as a deque initialised with the goal
                             # Lookup table for the policy (init -1):
-    policy = -1 * np.ones(Constants.N * Constants.M)
+    policy = np.zeros(Constants.N * Constants.M, dtype=int)
     neighbours = get_neighbours()
-    actions = np.array([1, 5, 3, 7])  # Actions S, R, L, N
+    actions = np.array([7, 5, 3, 1], dtype=int)  # Actions N, E, W, S
 
     # BFS traversal
     while bool(queue):      # While the queue is not empty
@@ -107,6 +109,88 @@ def bfs_policy() -> np.array:
         queue.extendleft(i_dash_nv)
 
     return policy
+
+def jumpstart_v(policy: np.array, p: np.array) -> np.array:
+    """
+    Create a jumpstart value function based on a jumpstart policy (BFS) by
+    performing fixed-point policy evaluation. To reduce the state space, 
+    swan position is not accounted for but all other aspectss of the problem
+    are.
+
+    ### Parameters
+    - policy : 1D np.array of M*N elements
+        - Each element specifies an integer in the input space. For undefned
+          states (e.g. on the cell of static drones) the policy is 0
+    - p : 3D np.array (K, K, L)
+        - Transition probabilities
+
+    ### Returns
+    - 2D np.array (K, K)
+        - Value function for every state. Across the swan states the value
+          function will be identical
+    """
+
+    ### --- SET SWAN POSITION --- ###
+
+    # To keep the jumpstart efficient, the swan's position is kept constant
+    # while evaluating the jumpstart policy. It is positioned close to the 
+    # goal node. The jumpstart value function for this swan position will be
+    # copied for all swan positions; since the swan was close to the goal
+    # node, the overestimation of the cost in that cell should be removable
+    # with few iterations of value iteration.
+
+    swan_range = 1  # how far the swan may be from the goal
+
+    lower_n = max(0, Constants.GOAL_POS[1] - swan_range)
+    upper_n = min(Constants.N - 1, Constants.GOAL_POS[1] + swan_range) + 1
+    lower_m = max(0, Constants.GOAL_POS[0] - swan_range)
+    upper_m = min(Constants.M - 1, Constants.GOAL_POS[0] + swan_range) + 1
+
+    # Positioning the swan even when the goal in a corner / at the edge
+    patch = np.zeros((upper_n - lower_n, upper_m - lower_m))
+    patch[Constants.GOAL_POS[1] - lower_n, 
+          Constants.GOAL_POS[0] - lower_m] = np.nan
+    legal_pos = np.where(~np.isnan(patch))
+    swan_pos = legal_pos[0][0] + lower_n, legal_pos[1][0] + lower_m
+    swan_idx = np.ravel_multi_index(swan_pos, (Constants.N, Constants.M))
+
+    # Getting the indices range of drone states with this swan state
+    lower_drone_idx = swan_idx * Constants.N * Constants.M
+    upper_drone_idx = (swan_idx + 1) * Constants.N * Constants.M
+
+    ### --- POLICY EVALUATION --- ###
+
+    # Select transition probabilities: constant swan position
+    p_drone = p[lower_drone_idx:upper_drone_idx, 
+                lower_drone_idx:upper_drone_idx, :]
+
+    print("jo")
+    
+
+def full_v_jumpstart(policy: np.array, p: np.array, q: np.array) -> np.array:
+    """
+    As jumpstart v but taking account of the swan positions as well
+    """
+
+    # Transition probabilities according to pi
+    # The same policy is applied regardless of the swan position
+    nm = Constants.N * Constants.M
+    pi = np.tile(policy, nm)
+    p_pi = p[np.arange(nm**2), :, pi]  # select actions according to policy
+
+    # Expected stage cost according to pi:
+    q_pi = q[np.arange(nm**2), pi]     # select actions according to policy
+
+    # Policy evalutation: initialisation
+    v_opt = np.zeros(nm**2)
+    v_opt_new = q_pi + p_pi @ v_opt
+    i = 0
+    while not np.allclose(v_opt, v_opt_new, rtol=1e-5, atol=1e-8):
+        v_opt = v_opt_new
+        v_opt_new = q_pi + p_pi @ v_opt
+        i += 1
+
+    return v_opt_new
 
 
 def solution(P, Q, Constants):
@@ -135,8 +219,14 @@ def solution(P, Q, Constants):
 
     """
 
-    J_opt = np.zeros(Constants.K)
-    u_opt = np.zeros(Constants.K)
+    ### --- POLICY EVALUATION OF JUMPSTART --- ###
+
+    # Find (approximate) value function to the policy provided by the
+    # jumpstart graph traversal. Finds the value function only for one swan
+    # position
+
+    J_opt = full_v_jumpstart(bfs_policy(), P, Q)
+    u_opt = np.zeros(Constants.M**2 * Constants.N**2, dtype=int)
 
     # Value iteration vanilla
     J_opt_new = np.min(Q + np.sum(P * J_opt.reshape(1, -1, 1), axis=1), axis=1)
@@ -149,5 +239,5 @@ def solution(P, Q, Constants):
     return J_opt, u_opt
 
 if __name__ == "__main__":
-    p = bfs_policy()
+    # jumpstart_v(bfs_policy())
     print("Yippie!")
