@@ -21,7 +21,12 @@
 import numpy as np
 from utils import *
 from collections import deque
+
+# Remove before submitting:
+from line_profiler import profile
 from matplotlib import pyplot as plt
+COMPARISON_GRAPHICS = True  # Plot the jumpstarted vs the final value function
+
 
 def get_neighbours() -> np.array:
     """
@@ -110,6 +115,7 @@ def bfs_policy() -> np.array:
 
     return policy
 
+
 def jumpstart_v(policy: np.array, p: np.array) -> np.array:
     """
     Create a jumpstart value function based on a jumpstart policy (BFS) by
@@ -192,7 +198,7 @@ def full_v_jumpstart(policy: np.array, p: np.array, q: np.array) -> np.array:
 
     return v_opt_new
 
-
+@profile
 def solution(P, Q, Constants):
     """Computes the optimal cost and the optimal control input for each
     state of the state space solving the stochastic shortest
@@ -228,6 +234,9 @@ def solution(P, Q, Constants):
     J_opt = full_v_jumpstart(bfs_policy(), P, Q)
     u_opt = np.zeros(Constants.M**2 * Constants.N**2, dtype=int)
 
+    if COMPARISON_GRAPHICS:
+        J_init = J_opt.copy()
+
     # Value iteration vanilla
     J_opt_new = np.min(Q + np.sum(P * J_opt.reshape(1, -1, 1), axis=1), axis=1)
     i = 0
@@ -236,8 +245,23 @@ def solution(P, Q, Constants):
         J_opt_new = np.min(Q + np.sum(P * J_opt.reshape(1, -1, 1), axis=1), axis=1)
         i += 1
 
+    if COMPARISON_GRAPHICS:
+        mn = Constants.M * Constants.N
+        fig, axs = plt.subplots(nrows=1, ncols=2)
+        vmin = min(J_init.min(), J_opt.min())
+        vmax = max(J_init.max(), J_opt.max())
+        ims = axs[0].imshow(J_init[:mn].reshape(Constants.N, Constants.M), 
+                            vmin=vmin, vmax=vmax)
+        axs[0].set_title("Jumpstart V")
+        cax = fig.add_axes([0.2, 0.1, 0.6, 0.03])
+        cbar = fig.colorbar(ims, cax=cax, orientation="horizontal")
+        axs[1].imshow(J_opt[:mn].reshape(Constants.N, Constants.M), 
+                      vmin=vmin, vmax=vmax)
+        axs[1].set_title("Final V")
+        plt.show()
+
     return J_opt, u_opt
 
+
 if __name__ == "__main__":
-    # jumpstart_v(bfs_policy())
-    print("Yippie!")
+    pass
