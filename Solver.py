@@ -21,6 +21,7 @@
 import numpy as np
 from utils import *
 from collections import deque
+import heapq
 
 # Remove before submitting:
 from line_profiler import profile
@@ -28,35 +29,50 @@ from matplotlib import pyplot as plt
 COMPARISON_GRAPHICS = True  # Plot the jumpstarted vs the final value function
 
 
-def get_neighbours() -> np.array:
+def get_neighbours(use: str) -> np.array:
     """
     For the BFS jumpstart: get a np.array that shows what the neighbours 
     of points are
+
+    ### Params
+    - use : str
+        - One of ["bfs", "dijkstra"]. For "bfs", the four immediate neighbours
+          are returned. For "dijkstra" 8 neighbours are returned (incl. the
+          diagonals)
     
     ### Returns
     - np.array() dtype int
         - Each of the K rows represents a current postiion x_k. Each row
-          contains 4 elements that are the approximate neighbours: nodes
-          x_k-1 that could have been used to transition to node x_k. When
-          these nodes would be outside the grid or they are occupied by 
+          contains 4 or 8 elements that are the approximate neighbours: 
+          nodes x_k-1 that could have been used to transition to node x_k. 
+          When these nodes would be outside the grid or they are occupied by 
           a statinoary drone, np.nan is inserted.
     """
 
-    # An array of shape (n*m x 8): each row stands for a drone state, the 
-    # elements of each row are the indices of the 8 drone states that are
-    # neighbours of this drone state. When there are less than 8 neighbours
-    # they are padded with np.nan
+    assert use in ("bfs", "dijkstra") 
+
+    # An array of shape (n*m x 8) or (n*m x 4): each row stands for a drone 
+    # state, the elements of each row are the indices of the 8 drone states 
+    # that are neighbours of this drone state. When there are less than 8 
+    # neighbours they are padded with np.nan
 
     # Create a grid of indices
     indices = np.arange(Constants.N * Constants.M).reshape(Constants.N, Constants.M)
     # Create padded array with -1 on the borders
     padded_indices = np.pad(indices, pad_width=1, mode='constant', constant_values=-1)
-    # Collect the 8 neighbors using slicing
-    neighbours = np.stack([
-        padded_indices[:-2, 1:-1],
-        padded_indices[1:-1, :-2], padded_indices[1:-1, 2:],
-        padded_indices[2:, 1:-1],
-    ], axis=-1).reshape(-1, 4)
+    # Collect the 8 or 4 neighbors using slicing
+    if use == "bfs":
+        neighbours = np.stack([
+            padded_indices[:-2, 1:-1],
+            padded_indices[1:-1, :-2], padded_indices[1:-1, 2:],
+            padded_indices[2:, 1:-1],
+        ], axis=-1).reshape(-1, 4)
+    elif use == "dijkstra":
+        neighbours = np.stack([
+            padded_indices[:-2, :-2], padded_indices[:-2, 1:-1], padded_indices[:-2, 2:],
+            padded_indices[1:-1, :-2], padded_indices[1:-1, 2:],
+            padded_indices[2:, :-2], padded_indices[2:, 1:-1], padded_indices[2:, 2:]
+        ], axis=-1).reshape(-1, 8)
     # replace -1 by np.nan:
     neighbours = np.where(neighbours == -1, np.nan, neighbours)
 
@@ -88,7 +104,7 @@ def bfs_policy() -> np.array:
     queue = deque((g,))     # The queue as a deque initialised with the goal
                             # Lookup table for the policy (init -1):
     policy = np.zeros(Constants.N * Constants.M, dtype=int)
-    neighbours = get_neighbours()
+    neighbours = get_neighbours("bfs")
     actions = np.array([7, 5, 3, 1], dtype=int)  # Actions N, E, W, S
 
     # BFS traversal
@@ -113,6 +129,142 @@ def bfs_policy() -> np.array:
         # Inserting the non-visited neighbours into the queue
         queue.extendleft(i_dash_nv)
 
+    return policy
+
+# TODO: finish dijkstra
+def dijkstra_policy() -> np.array:
+    """
+    Run a best-first (dijkstra) traversal and return a jumpstart policy
+    neglecting the swan, the current and the stochastic transitions.
+    Using the actual thruster, time, and drone costs gives a good approxi-
+    mation of the value function of this policy (later used by
+    jumpstart_v()). 
+
+    ### Returns
+    - np.array, dtype int
+        - A map from the current state to the control input that will
+          (in an unweighted shortest path problem) lead the path to the 
+          goal
+    """
+
+    ### --- INITIALISE DATASTRUCTURES --- ###
+
+    # For Dijkstra traversal:
+    g = np.ravel_multi_index(np.flip(Constants.GOAL_POS),     # goal node 
+                             (Constants.N, Constants.M))
+    start = np.ravel_multi_index(np.flip(Constants.START_POS),
+                             (Constants.N, Constants.M))
+    visited = np.zeros(Constants.N * Constants.M, dtype=bool)
+    cost = np.empty(Constants.N * Constants.M, dtype=float)   # cost to go
+    cost[:] = np.inf
+    cost[g] = 0.
+    policy = np.zeros(Constants.N * Constants.M, dtype=int)
+    empty_queue = False                                       # break loop
+    visited[g] = True                                         # visited nodes
+    neighbours = get_neighbours("dijkstra")
+
+    # For computing actions and costs
+    actions = np.array([8, 7, 6, 5, 3, 2, 1, 0])      # actions per neighbour
+    c_diag = (Constants.TIME_COST                     # cost diagonal motion
+              + 2 * Constants.THRUSTER_COST)
+    c_straight = (Constants.TIME_COST                 # cost straight motion
+                  + Constants.THRUSTER_COST)
+    motion_cost = np.array([c_diag, c_straight,       # cost array: cost of
+                            c_diag, c_straight,       # corresponding actions
+                            c_straight, c_diag,       # from the actions array
+                            c_straight, c_diag], dtype=float)
+    motion_drone_cost = (motion_cost                  # Cost when also sinking
+                         + Constants.DRONE_COST)
+    
+    ### ------ INITIALISE PRIORITY QUEUE ------ ###
+
+    # A heapified list of entries. Each entry is a list. entry[0]: cost;
+    # entry[1]: nodeID; entry[2]: "p" for "present" or "r" for "removed"
+    entry_0 = [0., g, "p"]
+    queue = [entry_0]
+    # Array for retrieving the mutible entry (list) based on the node ID (its
+    # index). Also denotes what nodes are in the priority queue
+    entry_finder = np.empty(Constants.N * Constants.M, dtype=object)
+    entry_finder[g] = entry_0
+
+    ### ------ BEST-FIRST TRAVERSAL ------ ###
+
+    while bool(queue):  # while the queue is not empty
+
+        ## --- POP AN ENTRY --- ##
+
+        entry = heapq.heappop(queue)
+        while entry[-1] != "p":  # current entry has actually been removed
+            if bool(queue):      # queue non-empty: pop
+                entry = heapq.heappop(queue)
+            else:                # empty queue: break
+                empty_queue = True
+                break
+        if empty_queue:          # empty cueue: break outer loop too
+            break
+        i = entry[1]             # the node ID (cell index)
+        visited[i] = True        # popped from queue means visited
+        entry_finder[i] = None   # remove popped nodes from dict
+
+        ## --- PROCESS AN ENTRY wHEN NOT THE STARTING NODE --- ##
+
+        # if i != start:
+
+        # The genuine neighbours i_d of node i:
+        nan_mask = ~np.isnan(neighbours[i])  # Mask of genuine neighbours
+                                                # True where not nan
+        i_d = neighbours[i][nan_mask].astype("int")  # neighbour idx
+        i_d_motion_cost = motion_cost[nan_mask]      # cost getting there
+        a = actions[nan_mask]                # Genuine actions at i
+
+        # Which of these genuine neighbours have not yet been visited?
+        nv_mask = ~visited[i_d]              # Mask of non-visited i_d
+
+        # Did we find a cheaper way too any neighbour i_d?
+        cheaper_mask = (cost[i] + i_d_motion_cost < cost[i_d])
+
+        # Only when both are true would we like to update these neighbours
+        update_mask = nv_mask & cheaper_mask
+        i_to_update = i_d[update_mask]
+        a_to_update = a[update_mask]
+        c_to_update = i_d_motion_cost[update_mask]
+
+        """
+        i_d_nv = i_d[nv_mask]                # Non-visited i_dash
+        a_nv = a[nv_mask]                    # Actions to the i_dash_nv
+        cost_nv = i_d_motion_cost[nv_mask]   # ...cost of those actions
+
+        # Did we find a cheaper way to reach any of the i_d_nv?
+        cheaper_mask = (cost_nv + cost[i] < cost[i_d_nv])
+        i_to_update = i_d_nv[cheaper_mask]
+        a_to_update = a_nv[cheaper_mask]
+        c_to_update = cost_nv[cheaper_mask] + cost[i]  # new cost: stage
+                                                        # cost + parent c.
+        """
+
+        # Update the policy and cost of those neighbours i_to_update that
+        # have not yet been visited and whose cost-to-go is reduced:
+        policy[i_to_update] = a_to_update
+        cost[i_to_update] = c_to_update
+
+        # Book-keeping: 
+        #  - for those i_to_update that are alreay in the priority queue:
+        #    update their cost-to-go and heapify
+        #  - for those i_to_update that are newly discovered: add them to
+        #    the queue and heapify
+        for j, new_c in zip(i_to_update, c_to_update):
+            
+            # When in queue: invalidate entry by chaning "p" to "r"
+            if entry_finder[j] is not None:
+                entry_finder[j][-1] = "r"
+
+            # In any case: add new entry to the queue:
+            q_entry = [new_c, j, "p"]
+            heapq.heappush(queue, q_entry)
+            entry_finder[j] = q_entry
+                
+        # else:  # We are dealing with the last node
+    
     return policy
 
 
@@ -231,8 +383,8 @@ def solution(P, Q, Constants):
     # jumpstart graph traversal. Finds the value function only for one swan
     # position
 
-    J_opt = full_v_jumpstart(bfs_policy(), P, Q)
-    u_opt = np.zeros(Constants.M**2 * Constants.N**2, dtype=int)
+    jumpstart_policy = dijkstra_policy()
+    J_opt = full_v_jumpstart(jumpstart_policy, P, Q)
 
     if COMPARISON_GRAPHICS:
         J_init = J_opt.copy()
@@ -244,6 +396,9 @@ def solution(P, Q, Constants):
         J_opt = J_opt_new
         J_opt_new = np.min(Q + np.sum(P * J_opt.reshape(1, -1, 1), axis=1), axis=1)
         i += 1
+
+    # Find the optimal policy that belongs to this optimal vlaue function
+    u_opt = np.argmin(Q + np.sum(P * J_opt.reshape(1, -1, 1), axis=1), axis=1)
 
     if COMPARISON_GRAPHICS:
         mn = Constants.M * Constants.N
@@ -264,4 +419,4 @@ def solution(P, Q, Constants):
 
 
 if __name__ == "__main__":
-    pass
+    dijkstra_policy()
