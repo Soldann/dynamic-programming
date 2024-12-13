@@ -26,7 +26,7 @@ import heapq
 # Remove before submitting:
 from line_profiler import profile
 from matplotlib import pyplot as plt
-COMPARISON_GRAPHICS = True  # Plot the jumpstarted vs the final value function
+COMPARISON_GRAPHICS = False  # Plot the jumpstarted vs the final value function
 
 
 def get_neighbours(use: str) -> np.array:
@@ -131,8 +131,8 @@ def bfs_policy() -> np.array:
 
     return policy
 
-# TODO: finish dijkstra
-def dijkstra_policy() -> np.array:
+# TODO: extend Dijkstra to deal with Kamikaze problem (transitions to start)
+def dijkstra() -> np.array:
     """
     Run a best-first (dijkstra) traversal and return a jumpstart policy
     neglecting the swan, the current and the stochastic transitions.
@@ -245,7 +245,7 @@ def dijkstra_policy() -> np.array:
         # Update the policy and cost of those neighbours i_to_update that
         # have not yet been visited and whose cost-to-go is reduced:
         policy[i_to_update] = a_to_update
-        cost[i_to_update] = c_to_update
+        cost[i_to_update] = cost[i] + c_to_update
 
         # Book-keeping: 
         #  - for those i_to_update that are alreay in the priority queue:
@@ -265,65 +265,11 @@ def dijkstra_policy() -> np.array:
                 
         # else:  # We are dealing with the last node
     
-    return policy
+    # Remove the inf values in the final cost values:
+    cost = np.where(cost == np.inf, 0, cost)
 
+    return policy, cost
 
-def jumpstart_v(policy: np.array, p: np.array) -> np.array:
-    """
-    Create a jumpstart value function based on a jumpstart policy (BFS) by
-    performing fixed-point policy evaluation. To reduce the state space, 
-    swan position is not accounted for but all other aspectss of the problem
-    are.
-
-    ### Parameters
-    - policy : 1D np.array of M*N elements
-        - Each element specifies an integer in the input space. For undefned
-          states (e.g. on the cell of static drones) the policy is 0
-    - p : 3D np.array (K, K, L)
-        - Transition probabilities
-
-    ### Returns
-    - 2D np.array (K, K)
-        - Value function for every state. Across the swan states the value
-          function will be identical
-    """
-
-    ### --- SET SWAN POSITION --- ###
-
-    # To keep the jumpstart efficient, the swan's position is kept constant
-    # while evaluating the jumpstart policy. It is positioned close to the 
-    # goal node. The jumpstart value function for this swan position will be
-    # copied for all swan positions; since the swan was close to the goal
-    # node, the overestimation of the cost in that cell should be removable
-    # with few iterations of value iteration.
-
-    swan_range = 1  # how far the swan may be from the goal
-
-    lower_n = max(0, Constants.GOAL_POS[1] - swan_range)
-    upper_n = min(Constants.N - 1, Constants.GOAL_POS[1] + swan_range) + 1
-    lower_m = max(0, Constants.GOAL_POS[0] - swan_range)
-    upper_m = min(Constants.M - 1, Constants.GOAL_POS[0] + swan_range) + 1
-
-    # Positioning the swan even when the goal in a corner / at the edge
-    patch = np.zeros((upper_n - lower_n, upper_m - lower_m))
-    patch[Constants.GOAL_POS[1] - lower_n, 
-          Constants.GOAL_POS[0] - lower_m] = np.nan
-    legal_pos = np.where(~np.isnan(patch))
-    swan_pos = legal_pos[0][0] + lower_n, legal_pos[1][0] + lower_m
-    swan_idx = np.ravel_multi_index(swan_pos, (Constants.N, Constants.M))
-
-    # Getting the indices range of drone states with this swan state
-    lower_drone_idx = swan_idx * Constants.N * Constants.M
-    upper_drone_idx = (swan_idx + 1) * Constants.N * Constants.M
-
-    ### --- POLICY EVALUATION --- ###
-
-    # Select transition probabilities: constant swan position
-    p_drone = p[lower_drone_idx:upper_drone_idx, 
-                lower_drone_idx:upper_drone_idx, :]
-
-    print("jo")
-    
 
 def full_v_jumpstart(policy: np.array, p: np.array, q: np.array) -> np.array:
     """
@@ -349,6 +295,7 @@ def full_v_jumpstart(policy: np.array, p: np.array, q: np.array) -> np.array:
         i += 1
 
     return v_opt_new
+
 
 @profile
 def solution(P, Q, Constants):
@@ -380,11 +327,12 @@ def solution(P, Q, Constants):
     ### --- POLICY EVALUATION OF JUMPSTART --- ###
 
     # Find (approximate) value function to the policy provided by the
-    # jumpstart graph traversal. Finds the value function only for one swan
-    # position
+    # jumpstart graph traversal.
 
-    jumpstart_policy = dijkstra_policy()
-    J_opt = full_v_jumpstart(jumpstart_policy, P, Q)
+    jumpstart_policy, jumpstart_v = dijkstra()
+    nm = Constants.N * Constants.M
+    J_opt =  np.tile(jumpstart_v, nm)
+    # J_opt = np.zeros(Constants.K)
 
     if COMPARISON_GRAPHICS:
         J_init = J_opt.copy()
@@ -419,4 +367,4 @@ def solution(P, Q, Constants):
 
 
 if __name__ == "__main__":
-    dijkstra_policy()
+    dijkstra()
