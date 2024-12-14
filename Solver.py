@@ -137,7 +137,7 @@ def bfs_policy() -> np.array:
 
     return policy
 
-# TODO: extend Dijkstra to deal with Kamikaze problem (transitions to start)
+
 def dijkstra() -> np.array:
     """
     Run a best-first (dijkstra) traversal and return a jumpstart policy
@@ -235,19 +235,6 @@ def dijkstra() -> np.array:
         a_to_update = a[update_mask]
         c_to_update = i_d_motion_cost[update_mask]
 
-        """
-        i_d_nv = i_d[nv_mask]                # Non-visited i_dash
-        a_nv = a[nv_mask]                    # Actions to the i_dash_nv
-        cost_nv = i_d_motion_cost[nv_mask]   # ...cost of those actions
-
-        # Did we find a cheaper way to reach any of the i_d_nv?
-        cheaper_mask = (cost_nv + cost[i] < cost[i_d_nv])
-        i_to_update = i_d_nv[cheaper_mask]
-        a_to_update = a_nv[cheaper_mask]
-        c_to_update = cost_nv[cheaper_mask] + cost[i]  # new cost: stage
-                                                        # cost + parent c.
-        """
-
         # Update the policy and cost of those neighbours i_to_update that
         # have not yet been visited and whose cost-to-go is reduced:
         policy[i_to_update] = a_to_update
@@ -271,8 +258,8 @@ def dijkstra() -> np.array:
                 
         # else:  # We are dealing with the last node
     
-    # Remove the inf values in the final cost values:
-    cost = np.where(cost == np.inf, 0, cost)
+    # Remove the remaining inf values in the final cost values:
+    cost = np.where(cost == np.inf, 0., cost)
 
     return policy, cost
 
@@ -385,7 +372,6 @@ def solution(P, Q, Constants):
         for i in range(Constants.K):  # for each state
             J_opt_new[i] = np.min(Q[i] + J_opt_new[np.newaxis, nn[i]] @ pp[i])
         j += 1
-    
     
     # Find the optimal policy that belongs to this optimal vlaue function
     u_opt = np.empty(Constants.K, dtype=int)
