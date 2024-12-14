@@ -110,3 +110,45 @@ def state2idx(state):
         factor *= j
 
     return idx
+
+def idx2state_with_constant(idx, Constants):
+    """Converts a given index into the corresponding state.
+
+    Args:
+        idx (int): index of the entry whose state is required
+
+    Returns:
+        np.array: (x,y,x,y) state corresponding to the given index
+    """
+    state = np.empty(4)
+
+    for i, j in enumerate(
+        [
+            Constants.M,
+            Constants.N,
+            Constants.M,
+            Constants.N,
+        ]
+    ):
+        state[i] = idx % j
+        idx = idx // j
+    return state
+
+
+def state2idx_with_constant(state, Constants):
+    """Converts a given state into the corresponding index.
+
+    Args:
+        state (np.array): (x,y,x,y) entry in the state space
+
+    Returns:
+        int: index corresponding to the given state
+    """
+    idx = 0
+
+    factor = 1
+    for i, j in enumerate([Constants.M, Constants.N, Constants.M, Constants.N]):
+        idx += state[i] * factor
+        factor *= j
+
+    return idx
