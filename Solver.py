@@ -36,9 +36,9 @@ def get_neighbours(use: str) -> np.array:
 
     ### Params
     - use : str
-        - One of ["bfs", "dijkstra"]. For "bfs", the four immediate neighbours
-          are returned. For "dijkstra" 8 neighbours are returned (incl. the
-          diagonals)
+        - One of ["bfs", "dijkstra", "vi"]. For "bfs", the four immediate 
+          neighbours are returned. For "dijkstra" 8 neighbours are returned 
+          (incl. the diagonals). For "vi" the central node is also returned
     
     ### Returns
     - np.array() dtype int
@@ -49,7 +49,7 @@ def get_neighbours(use: str) -> np.array:
           a statinoary drone, np.nan is inserted.
     """
 
-    assert use in ("bfs", "dijkstra") 
+    assert use in ("bfs", "dijkstra", "vi") 
 
     # An array of shape (n*m x 8) or (n*m x 4): each row stands for a drone 
     # state, the elements of each row are the indices of the 8 drone states 
@@ -58,9 +58,9 @@ def get_neighbours(use: str) -> np.array:
 
     # Create a grid of indices
     indices = np.arange(Constants.N * Constants.M).reshape(Constants.N, Constants.M)
+    # Collect the 8 or 4 neighbors using slicing
     # Create padded array with -1 on the borders
     padded_indices = np.pad(indices, pad_width=1, mode='constant', constant_values=-1)
-    # Collect the 8 or 4 neighbors using slicing
     if use == "bfs":
         neighbours = np.stack([
             padded_indices[:-2, 1:-1],
@@ -73,6 +73,12 @@ def get_neighbours(use: str) -> np.array:
             padded_indices[1:-1, :-2], padded_indices[1:-1, 2:],
             padded_indices[2:, :-2], padded_indices[2:, 1:-1], padded_indices[2:, 2:]
         ], axis=-1).reshape(-1, 8)
+    elif use == "vi":
+        neighbours = np.stack([
+            padded_indices[:-2, :-2], padded_indices[:-2, 1:-1], padded_indices[:-2, 2:],
+            padded_indices[1:-1, :-2], padded_indices[1:-1, 1:-1], padded_indices[1:-1, 2:],
+            padded_indices[2:, :-2], padded_indices[2:, 1:-1], padded_indices[2:, 2:]
+        ], axis=-1).reshape(-1, 9)
     # replace -1 by np.nan:
     neighbours = np.where(neighbours == -1, np.nan, neighbours)
 
@@ -323,6 +329,8 @@ def solution(P, Q, Constants):
         np.array: The optimal control policy for the stochastic SPP
 
     """
+    start = np.ravel_multi_index(np.flip(Constants.START_POS),
+                                 (Constants.N, Constants.M))
 
     ### --- POLICY EVALUATION OF JUMPSTART --- ###
 
@@ -332,21 +340,58 @@ def solution(P, Q, Constants):
     jumpstart_policy, jumpstart_v = dijkstra()
     nm = Constants.N * Constants.M
     J_opt =  np.tile(jumpstart_v, nm)
-    # J_opt = np.zeros(Constants.K)
 
+    # If desired: visually compare the jumpstart V and the final V.
     if COMPARISON_GRAPHICS:
         J_init = J_opt.copy()
 
-    # Value iteration vanilla
-    J_opt_new = np.min(Q + np.sum(P * J_opt.reshape(1, -1, 1), axis=1), axis=1)
-    i = 0
-    while not np.allclose(J_opt, J_opt_new, rtol=1e-5, atol=1e-8):
-        J_opt = J_opt_new
-        J_opt_new = np.min(Q + np.sum(P * J_opt.reshape(1, -1, 1), axis=1), axis=1)
-        i += 1
+    ### --- FOR LOOP VALUE ITERATION --- ###
 
+    # Advantages for loop: (1) asynchronous value iteration, (2) for each
+    # state, consider only those next states than can actually be reached
+
+    # Finding the possible next states of the drone
+    drone_neighbours = get_neighbours("vi")          # Neighbours in range 1
+    flow = Constants.FLOW_FIELD.reshape(-1, 2, order="F")  # flattened flow f.
+    x, y = np.meshgrid(np.arange(Constants.M), np.arange(Constants.N))
+    xy = np.stack((x.reshape(-1), y.reshape(-1)), axis=1)
+    flow_drone_xy = xy + flow                        # Drone pos. with current
+    flow_drone_i = np.ravel_multi_index((flow_drone_xy[:, 1], 
+                                         flow_drone_xy[:, 0]), 
+                                         (Constants.N, Constants.M),
+                                         mode="clip")  # Flattened c. position
+    all_neigh = np.hstack((drone_neighbours, 
+                          drone_neighbours[flow_drone_i], 
+                          np.c_[[start] * nm]))        # Possible next pos.
+    np.nan_to_num(all_neigh, copy=False, nan=start) 
+    all_neigh = np.array([np.unique(all_neigh[i]).astype(int)  # Remove repe-
+                          for i in range(nm)], dtype=object)   # ted next pos.
+    all_neigh_sw = np.array([np.hstack([all_neigh[i] + nm * j  # Allow any 
+                                        for j in range(nm)])   # next swan p.
+                             for i in range(nm)], dtype=object)
+
+    # Accelerate value lookup:
+    nn = [all_neigh_sw[i % nm] for i in range(Constants.K)]
+    pp = [P[i, nn[i], :] for i in range(Constants.K)]
+
+    # first iteration
+    J_opt_new = J_opt.copy()
+    for i in range(Constants.K):  # for each state
+        J_opt_new[i] = np.min(Q[i] + J_opt_new[np.newaxis, nn[i]] @ pp[i])
+        
+    # VI until convergence:
+    j = 0
+    while not np.allclose(J_opt, J_opt_new, rtol=1e-5, atol=1e-8):
+        J_opt = J_opt_new.copy()
+        for i in range(Constants.K):  # for each state
+            J_opt_new[i] = np.min(Q[i] + J_opt_new[np.newaxis, nn[i]] @ pp[i])
+        j += 1
+    
+    
     # Find the optimal policy that belongs to this optimal vlaue function
-    u_opt = np.argmin(Q + np.sum(P * J_opt.reshape(1, -1, 1), axis=1), axis=1)
+    u_opt = np.empty(Constants.K, dtype=int)
+    for i in range(Constants.K):
+        u_opt[i] = np.argmin(Q[i] + J_opt_new[np.newaxis, nn[i]] @ pp[i])
 
     if COMPARISON_GRAPHICS:
         mn = Constants.M * Constants.N
