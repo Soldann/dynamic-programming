@@ -24,8 +24,11 @@ from ComputeExpectedStageCosts import compute_expected_stage_cost
 from ComputeTransitionProbabilities import compute_transition_probabilities
 from Constants import Constants
 from Solver import solution
+from utils import idx2state, state2idx
+from line_profiler import profile
 
-if __name__ == "__main__":
+@profile
+def func():
     n_tests = 4
     for i in range(n_tests):
         print("-----------")
@@ -70,3 +73,6 @@ if __name__ == "__main__":
             print("Correct optimal cost")
 
     print("-----------")
+
+if __name__ == "__main__":
+    func()
