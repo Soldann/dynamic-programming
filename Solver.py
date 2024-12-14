@@ -336,7 +336,6 @@ def solution(P, Q, Constants):
 
     # Find (approximate) value function to the policy provided by the
     # jumpstart graph traversal.
-
     jumpstart_policy, jumpstart_v = dijkstra()
     nm = Constants.N * Constants.M
     J_opt =  np.tile(jumpstart_v, nm)
@@ -412,4 +411,8 @@ def solution(P, Q, Constants):
 
 
 if __name__ == "__main__":
-    dijkstra()
+    from ComputeExpectedStageCosts import compute_expected_stage_cost
+    from ComputeTransitionProbabilities import compute_transition_probabilities
+    P = compute_transition_probabilities(Constants)
+    Q = compute_expected_stage_cost(Constants)
+    solution(P, Q, Constants)
