@@ -92,7 +92,8 @@ class CacheableConstants:
                 np.array_equal(self.CURRENT_PROB, other.CURRENT_PROB) and
                 np.array_equal(self.FLOW_FIELD, other.FLOW_FIELD))
 
-def process_state(state, Constants):
+def process_state(state):
+    global Constants
 
     P = np.zeros((Constants.K, Constants.L))
     Q = np.ones((Constants.L)) * np.inf
@@ -219,6 +220,11 @@ def process_state(state, Constants):
     return P, Q
 
 
+def initialize_worker(new_consts):
+    global Constants
+    Constants = new_consts
+
+
 def ComputeValuesParallel(Constants) -> None:
     """
         Computes both transition probabilities and expected stage costs for a 
@@ -236,9 +242,9 @@ def ComputeValuesParallel(Constants) -> None:
     global P
     global Q
 
-    with multiprocessing.Pool(os.cpu_count()) as cpu_pool:
+    with multiprocessing.Pool(os.cpu_count(), initializer=initialize_worker, initargs=(CachedConstants,)) as cpu_pool:
 
-        results = cpu_pool.starmap(process_state, [(i, constants_to_cache) for i in range(Constants.K)])
+        results = cpu_pool.map(process_state, range(Constants.K))
         # TODO fill the transition probability matrix P here
         P = np.array([result[0] for result in results])
         Q = np.array([result[1] for result in results])
