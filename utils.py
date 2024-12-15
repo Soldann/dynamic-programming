@@ -17,16 +17,25 @@
  --
 """
 
+# APPROACH:
+# Computing the transition probabilities and the expected stage cost require
+# very similar computations. To make the code more efficient, we have decided
+# to do one computation for both P and Q. compute_transition_probabilities and
+# compute_expected_stage_costs() then only return the result that was pre-
+# computed. P and Q are actually calculated here, in the lower section of this
+# file. 
+
 import numpy as np
 from Constants import Constants
 import multiprocessing
 import os
 
+# remove before submission
 from line_profiler import profile
 
-# Upon calling either compute_transition_probabilities() or 
-# compute_expected_stage_costs() the superfunction is called and computes
-# bot P and Q. They are stored in these variables.
+# P and Q store the results computed in this file. CachedConstants is used
+# to check if the Constants passed to compute_transition_probabilities()
+# and compute_expected_stage_costs() are the same.
 P = None
 Q = None
 CachedConstants = None
@@ -164,13 +173,16 @@ def state2idx_with_constant(state, Constants):
 
     return idx
 
-##### -------------------------------------------------------- #####
-##### -------------------- SUPERFUNCTION --------------------- #####
-##### -------------------------------------------------------- #####
+##### ---------------------------------------------------------- #####
+##### -------------------- COMPUTE P AND Q --------------------- #####
+##### ---------------------------------------------------------- #####
 
 class CacheableConstants:
-        # Feel free to tweak these to test your solution.
-    # ----- World -----
+    """
+    Class to compare the attributes of the passed Constants class. If all the
+    attributes are the same, P and Q do not have to be re-computed. If they
+    are not, a new computation will be triggered.
+    """
 
     def __init__(self, constants_to_cache):
         self.M = constants_to_cache.M
@@ -207,6 +219,10 @@ class CacheableConstants:
                 np.array_equal(self.FLOW_FIELD, other.FLOW_FIELD))
 
 def process_state(state, Constants):
+    """
+    Function used to get P and Q for each individual state. Is called by 
+    ComputeValuesParallel()
+    """
 
     P = np.zeros((Constants.K, Constants.L))
     Q = np.ones((Constants.L)) * np.inf
@@ -332,7 +348,7 @@ def process_state(state, Constants):
 
     return P, Q
 
-
+@ profile
 def ComputeValuesParallel(Constants) -> None:
     """
         Computes both transition probabilities and expected stage costs for a 
