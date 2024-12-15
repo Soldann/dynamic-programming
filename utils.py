@@ -31,9 +31,6 @@ import multiprocessing
 import os
 import ctypes
 
-# remove before submission
-from line_profiler import profile
-
 # P and Q store the results computed in this file. CachedConstants is used
 # to check if the Constants passed to compute_transition_probabilities()
 # and compute_expected_stage_costs() are the same.
@@ -360,7 +357,7 @@ def initialize_worker(shared_P_array, shared_Q_array, new_consts):
     P = np.frombuffer(shared_P_array, dtype=np.float32).reshape((Constants.K, Constants.K, Constants.L))
     Q = np.frombuffer(shared_Q_array, dtype=np.float32).reshape((Constants.K, Constants.L))
 
-@ profile
+
 def ComputeValuesParallel(Constants) -> None:
     """
         Computes both transition probabilities and expected stage costs for a 

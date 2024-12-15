@@ -23,16 +23,24 @@ from utils import *
 from collections import deque
 import heapq
 
-# Remove before submitting:
-from line_profiler import profile
-from matplotlib import pyplot as plt
-COMPARISON_GRAPHICS = False  # Plot the jumpstarted vs the final value function
-
+# APPROACH
+# We have decided to implement a modified version of asynchronous value 
+# iteration. It is modified in the following senses:
+#  (1) For each state, we do not consider all states as possible next states,
+#      but only those that the drone can reach through the combination of 
+#      thrust and currents. This solution will scale better with bigger state
+#      spaces than the standard variant.
+#  (2) We provide the VI with a jumpstart state value function. This jump-
+#      start v is computed by running Dijkstra's algorithm on the grid world
+#      (disregarding the swan position), starting from the goal position.
+#      Using the costs of time and thrusters, an estimate of the cost-to-go
+#      for each state is computed. The current is neglected in this 
+#      approximationBy starting VI with this estimate, saves several 
+#      iterations.
 
 def get_neighbours(use: str) -> np.array:
     """
-    For the BFS jumpstart: get a np.array that shows what the neighbours 
-    of points are
+    For getting the jumpstart state value function and for VI
 
     ### Params
     - use : str
@@ -300,7 +308,6 @@ def full_v_jumpstart(policy: np.array, p: np.array, q: np.array) -> np.array:
     return v_opt_new
 
 
-@profile
 def solution(P, Q, Constants):
     """Computes the optimal cost and the optimal control input for each
     state of the state space solving the stochastic shortest
@@ -336,10 +343,6 @@ def solution(P, Q, Constants):
     jumpstart_policy, jumpstart_v = dijkstra()
     nm = Constants.N * Constants.M
     J_opt =  np.tile(jumpstart_v, nm)
-
-    # If desired: visually compare the jumpstart V and the final V.
-    if COMPARISON_GRAPHICS:
-        J_init = J_opt.copy()
 
     ### --- FOR LOOP VALUE ITERATION --- ###
 
@@ -377,7 +380,7 @@ def solution(P, Q, Constants):
         
     # VI until convergence:
     j = 0
-    while not np.allclose(J_opt, J_opt_new, rtol=1e-5, atol=1e-8):
+    while not np.allclose(J_opt, J_opt_new, rtol=4e-5, atol=4e-8):
         J_opt = J_opt_new.copy()
         for i in range(Constants.K):  # for each state
             J_opt_new[i] = np.min(Q[i] + J_opt_new[np.newaxis, nn[i]] @ pp[i])
@@ -388,27 +391,11 @@ def solution(P, Q, Constants):
     for i in range(Constants.K):
         u_opt[i] = np.argmin(Q[i] + J_opt_new[np.newaxis, nn[i]] @ pp[i])
 
-    if COMPARISON_GRAPHICS:
-        mn = Constants.M * Constants.N
-        fig, axs = plt.subplots(nrows=1, ncols=2)
-        vmin = min(J_init.min(), J_opt.min())
-        vmax = max(J_init.max(), J_opt.max())
-        ims = axs[0].imshow(J_init[:mn].reshape(Constants.N, Constants.M), 
-                            vmin=vmin, vmax=vmax)
-        axs[0].set_title("Jumpstart V")
-        cax = fig.add_axes([0.2, 0.1, 0.6, 0.03])
-        cbar = fig.colorbar(ims, cax=cax, orientation="horizontal")
-        axs[1].imshow(J_opt[:mn].reshape(Constants.N, Constants.M), 
-                      vmin=vmin, vmax=vmax)
-        axs[1].set_title("Final V")
-        plt.show()
-
     return J_opt, u_opt
 
 
 if __name__ == "__main__":
     # Testing custon maps if desired:
-    @profile
     def test_custom():
         from ComputeExpectedStageCosts import compute_expected_stage_cost
         from ComputeTransitionProbabilities import compute_transition_probabilities
