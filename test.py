@@ -25,9 +25,8 @@ from ComputeTransitionProbabilities import compute_transition_probabilities
 from Constants import Constants
 from Solver import solution
 from utils import idx2state, state2idx
-from line_profiler import profile
 
-@profile
+
 def func():
     n_tests = 4
     for i in range(n_tests):

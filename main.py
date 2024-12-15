@@ -28,9 +28,9 @@ from Solver import solution
 
 if __name__ == "__main__":
     # Set the following to True as you progress with the files
-    TRANSITION_PROBABILITIES_IMPLEMENTED = False
-    STAGE_COSTS_IMPLEMENTED = False
-    SOLUTION_IMPLEMENTED = False
+    TRANSITION_PROBABILITIES_IMPLEMENTED = True
+    STAGE_COSTS_IMPLEMENTED = True
+    SOLUTION_IMPLEMENTED = True
 
     # Compute transition probabilities
     if TRANSITION_PROBABILITIES_IMPLEMENTED:
