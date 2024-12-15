@@ -21,7 +21,7 @@ import numpy as np
 from utils import *
 import multiprocessing
 import os
-import copy
+import ctypes
 
 # Upon calling either compute_transition_probabilities() or 
 # compute_expected_stage_costs() the superfunction is called and computes
@@ -95,8 +95,8 @@ class CacheableConstants:
 def process_state(state):
     global Constants
 
-    P = np.zeros((Constants.K, Constants.L))
-    Q = np.ones((Constants.L)) * np.inf
+    global P
+    global Q
 
     starting_state = idx2state_with_constant(state, Constants).astype(np.int32)
 
@@ -105,8 +105,8 @@ def process_state(state):
     if (robot_x == swan_x and robot_y == swan_y # if we have collided with the swan
         or np.any((Constants.DRONE_POS == [robot_x, robot_y]).all(axis=1)) # or if we have collided with a static drone
         or robot_x == Constants.GOAL_POS[0] and robot_y == Constants.GOAL_POS[1]): # or we have reached the goal state
-        Q[:] = 0
-        return P, Q
+        Q[state, :] = 0
+        return
 
     w_current_x, w_current_y = Constants.FLOW_FIELD[robot_x, robot_y]
     current_prob = Constants.CURRENT_PROB[robot_x,robot_y]
@@ -165,7 +165,7 @@ def process_state(state):
             a = 1
         else:
             ending_idx = state2idx_with_constant([new_robot_x, new_robot_y, swan_x, swan_y], Constants)
-            P[ending_idx, input] += (1 - current_prob) * (1 - Constants.SWAN_PROB)
+            P[state, ending_idx, input] += (1 - current_prob) * (1 - Constants.SWAN_PROB)
 
     
         #  Case 2: No current, swan moves
@@ -176,7 +176,7 @@ def process_state(state):
             b = 1
         else:
             ending_idx = state2idx_with_constant([new_robot_x, new_robot_y, potential_swan_move_x, potential_swan_move_y], Constants)
-            P[ending_idx, input] += (1 - current_prob) * (Constants.SWAN_PROB)
+            P[state, ending_idx, input] += (1 - current_prob) * (Constants.SWAN_PROB)
 
         # Case 3: Current, swan doesn't move
         new_robot_x = robot_x + control_x + w_current_x
@@ -194,7 +194,7 @@ def process_state(state):
             c = 1        
         else:
             ending_idx = state2idx_with_constant([new_robot_x, new_robot_y, swan_x, swan_y], Constants)
-            P[ending_idx, input] += (current_prob) * (1 - Constants.SWAN_PROB)
+            P[state, ending_idx, input] += (current_prob) * (1 - Constants.SWAN_PROB)
         
         # Case 4: Current, swan
 
@@ -205,24 +205,26 @@ def process_state(state):
             d =  1
         else:
             ending_idx = state2idx_with_constant([new_robot_x, new_robot_y, potential_swan_move_x, potential_swan_move_y], Constants)
-            P[ending_idx, input] += (current_prob) * (Constants.SWAN_PROB)
+            P[state, ending_idx, input] += (current_prob) * (Constants.SWAN_PROB)
         
         # Set value in case of crash:
         crash_value = a*(1-current_prob)*(1-Constants.SWAN_PROB) + b*(1-current_prob)*(Constants.SWAN_PROB) + c*(current_prob)*(1-Constants.SWAN_PROB) + d*(current_prob)*(Constants.SWAN_PROB)
-        P[:, input].reshape((Constants.M, Constants.N, Constants.M, Constants.N), order='F')[Constants.START_POS[0], Constants.START_POS[1],:] += np.full((Constants.M, Constants.N), crash_value/(Constants.M*Constants.N-1))
+        P[state, :, input].reshape((Constants.M, Constants.N, Constants.M, Constants.N), order='F')[Constants.START_POS[0], Constants.START_POS[1],:] += np.full((Constants.M, Constants.N), crash_value/(Constants.M*Constants.N-1))
 
         # Reset value where swan starts at start position
         ending_idx = state2idx_with_constant([*Constants.START_POS, *Constants.START_POS], Constants)
-        P[ending_idx, input] = 0
+        P[state, ending_idx, input] = 0
         thruster_val = Constants.INPUT_SPACE[input]
-        Q[input] = Constants.TIME_COST + Constants.THRUSTER_COST*(np.sum(np.abs(thruster_val))) + crash_value*Constants.DRONE_COST
-
-    return P, Q
+        Q[state, input] = Constants.TIME_COST + Constants.THRUSTER_COST*(np.sum(np.abs(thruster_val))) + crash_value*Constants.DRONE_COST
 
 
-def initialize_worker(new_consts):
+def initialize_worker(shared_P_array, shared_Q_array, new_consts):
     global Constants
     Constants = new_consts
+    global P
+    global Q
+    P = np.frombuffer(shared_P_array, dtype=np.float32).reshape((Constants.K, Constants.K, Constants.L))
+    Q = np.frombuffer(shared_Q_array, dtype=np.float32).reshape((Constants.K, Constants.L))
 
 
 def ComputeValuesParallel(Constants) -> None:
@@ -242,11 +244,14 @@ def ComputeValuesParallel(Constants) -> None:
     global P
     global Q
 
-    with multiprocessing.Pool(os.cpu_count(), initializer=initialize_worker, initargs=(CachedConstants,)) as cpu_pool:
+    shared_P_array = multiprocessing.RawArray(ctypes.c_float, Constants.K * Constants.K * Constants.L)
+    shared_Q_array = multiprocessing.RawArray(ctypes.c_float, [np.inf] * Constants.K * Constants.L)
+    P = np.ctypeslib.as_array(shared_P_array).reshape((Constants.K, Constants.K, Constants.L))
+    Q = np.ctypeslib.as_array(shared_Q_array).reshape((Constants.K, Constants.L))
+
+    with multiprocessing.Pool(os.cpu_count(), initializer=initialize_worker, initargs=(shared_P_array, shared_Q_array, CachedConstants)) as cpu_pool:
 
         results = cpu_pool.map(process_state, range(Constants.K))
         # TODO fill the transition probability matrix P here
-        P = np.array([result[0] for result in results])
-        Q = np.array([result[1] for result in results])
         cpu_pool.close()
         cpu_pool.join()
