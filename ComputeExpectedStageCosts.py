@@ -18,8 +18,7 @@
 """
 
 import numpy as np
-from utils import *
-import ComputeTransitionProbabilities
+import utils
 
 
 def compute_expected_stage_cost(Constants):
@@ -35,9 +34,10 @@ def compute_expected_stage_cost(Constants):
 
     Returns:
         np.array: Expected stage cost Q of shape (K,L)
-"""
-    ComputeTransitionProbabilities.ComputeValuesParallel(Constants)
-    return ComputeTransitionProbabilities.Q
+    """
+
+    utils.ComputeValuesParallel(Constants)
+    return utils.Q
 
 
 def traditional_exp_stage_cost(Constants) -> np.array:
