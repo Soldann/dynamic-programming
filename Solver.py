@@ -49,8 +49,6 @@ def get_neighbours(use: str) -> np.array:
           a statinoary drone, np.nan is inserted.
     """
 
-    assert use in ("bfs", "dijkstra", "vi") 
-
     # An array of shape (n*m x 8) or (n*m x 4): each row stands for a drone 
     # state, the elements of each row are the indices of the 8 drone states 
     # that are neighbours of this drone state. When there are less than 8 
@@ -94,7 +92,10 @@ def get_neighbours(use: str) -> np.array:
 def bfs_policy() -> np.array: 
     """
     Run a bfs traversal and return a jumpstart policy neglecting the sawn, 
-    the current and the stochastic transitions
+    the current and the stochastic transitions. This can be used together
+    with the function full_v_jumpstart() as an alternative to dijkstra().
+    However, we found that using the cost function of dijkstra to jumpstart
+    the value function works best.
 
     ### Returns
     - np.array, dtype int
@@ -138,7 +139,7 @@ def bfs_policy() -> np.array:
     return policy
 
 
-def dijkstra() -> np.array:
+def dijkstra() -> tuple:
     """
     Run a best-first (dijkstra) traversal and return a jumpstart policy
     neglecting the swan, the current and the stochastic transitions.
@@ -147,10 +148,11 @@ def dijkstra() -> np.array:
     jumpstart_v()). 
 
     ### Returns
-    - np.array, dtype int
+    - tuple(np.array, np.array)
         - A map from the current state to the control input that will
-          (in an unweighted shortest path problem) lead the path to the 
-          goal
+          lead the path to the goal according to the Dijkstra traversal
+        - The cost-to-go function according to Dijkstra. This is what is 
+          actually used to jumpstart the value function.
     """
 
     ### --- INITIALISE DATASTRUCTURES --- ###
@@ -179,8 +181,6 @@ def dijkstra() -> np.array:
                             c_diag, c_straight,       # corresponding actions
                             c_straight, c_diag,       # from the actions array
                             c_straight, c_diag], dtype=float)
-    motion_drone_cost = (motion_cost                  # Cost when also sinking
-                         + Constants.DRONE_COST)
     
     ### ------ INITIALISE PRIORITY QUEUE ------ ###
 
@@ -212,9 +212,7 @@ def dijkstra() -> np.array:
         visited[i] = True        # popped from queue means visited
         entry_finder[i] = None   # remove popped nodes from dict
 
-        ## --- PROCESS AN ENTRY wHEN NOT THE STARTING NODE --- ##
-
-        # if i != start:
+        ## --- PROCESS AN ENTRY --- ##
 
         # The genuine neighbours i_d of node i:
         nan_mask = ~np.isnan(neighbours[i])  # Mask of genuine neighbours
@@ -255,8 +253,6 @@ def dijkstra() -> np.array:
             q_entry = [new_c, j, "p"]
             heapq.heappush(queue, q_entry)
             entry_finder[j] = q_entry
-                
-        # else:  # We are dealing with the last node
     
     # Remove the remaining inf values in the final cost values:
     cost = np.where(cost == np.inf, 0., cost)
@@ -266,7 +262,21 @@ def dijkstra() -> np.array:
 
 def full_v_jumpstart(policy: np.array, p: np.array, q: np.array) -> np.array:
     """
-    As jumpstart v but taking account of the swan positions as well
+    Turns the jumpstart policy from bfs_policy() into a value funciton by
+    policy iteration. This can be used to jumpstart the value function. 
+    However, we found that directly using the cost function from Dijkstra 
+    works best.
+
+    ### Parameters
+    - policy np.array dtype int
+    - p: np.array dtype float
+        - Transition probabilities
+    - q: np.array dtype float
+        - Expected stage costs
+
+    ### Returns
+    - np.array dtype float
+        - State value function belonging to the given policy
     """
 
     # Transition probabilities according to pi
@@ -397,8 +407,12 @@ def solution(P, Q, Constants):
 
 
 if __name__ == "__main__":
-    from ComputeExpectedStageCosts import compute_expected_stage_cost
-    from ComputeTransitionProbabilities import compute_transition_probabilities
-    P = compute_transition_probabilities(Constants)
-    Q = compute_expected_stage_cost(Constants)
-    solution(P, Q, Constants)
+    # Testing custon maps if desired:
+    @profile
+    def test_custom():
+        from ComputeExpectedStageCosts import compute_expected_stage_cost
+        from ComputeTransitionProbabilities import compute_transition_probabilities
+        P = compute_transition_probabilities(Constants)
+        Q = compute_expected_stage_cost(Constants)
+        solution(P, Q, Constants)
+    test_custom()
