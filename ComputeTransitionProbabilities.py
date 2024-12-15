@@ -21,6 +21,7 @@ import numpy as np
 from utils import *
 import multiprocessing
 import os
+import copy
 
 # Upon calling either compute_transition_probabilities() or 
 # compute_expected_stage_costs() the superfunction is called and computes
@@ -44,6 +45,8 @@ def compute_transition_probabilities(Constants):
     Returns:
         np.array: Transition probability matrix of shape (K,K,L).
     """
+    global P
+
     ComputeValuesParallel(Constants)
     return P
 
@@ -51,12 +54,50 @@ def compute_transition_probabilities(Constants):
 ##### -------------------- SUPERFUNCTION --------------------- #####
 ##### -------------------------------------------------------- #####
 
+class CacheableConstants:
+        # Feel free to tweak these to test your solution.
+    # ----- World -----
+
+    def __init__(self, constants_to_cache):
+        self.M = constants_to_cache.M
+        self.N = constants_to_cache.N
+        self.START_POS = constants_to_cache.START_POS.copy()
+        self.GOAL_POS = constants_to_cache.GOAL_POS.copy()
+        self.DRONE_POS = constants_to_cache.DRONE_POS.copy()
+        self.K = constants_to_cache.K
+        self.INPUT_SPACE = constants_to_cache.INPUT_SPACE.copy()
+        self.L = constants_to_cache.L
+        self.THRUSTER_COST = constants_to_cache.THRUSTER_COST
+        self.TIME_COST = constants_to_cache.TIME_COST
+        self.DRONE_COST = constants_to_cache.DRONE_COST
+        self.SWAN_PROB = constants_to_cache.SWAN_PROB
+        self.CURRENT_PROB = constants_to_cache.CURRENT_PROB.copy()
+        self.FLOW_FIELD = constants_to_cache.FLOW_FIELD.copy()
+
+    def __eq__(self, other):
+        if not isinstance(other, CacheableConstants):
+            return False
+        return (self.M == other.M and
+                self.N == other.N and
+                np.array_equal(self.START_POS, other.START_POS) and
+                np.array_equal(self.GOAL_POS, other.GOAL_POS) and
+                np.array_equal(self.DRONE_POS, other.DRONE_POS) and
+                self.K == other.K and
+                np.array_equal(self.INPUT_SPACE, other.INPUT_SPACE) and
+                self.L == other.L and
+                self.THRUSTER_COST == other.THRUSTER_COST and
+                self.TIME_COST == other.TIME_COST and
+                self.DRONE_COST == other.DRONE_COST and
+                self.SWAN_PROB == other.SWAN_PROB and
+                np.array_equal(self.CURRENT_PROB, other.CURRENT_PROB) and
+                np.array_equal(self.FLOW_FIELD, other.FLOW_FIELD))
+
 def process_state(state, Constants):
 
     P = np.zeros((Constants.K, Constants.L))
     Q = np.ones((Constants.L)) * np.inf
 
-    starting_state = idx2state(state).astype(np.int32)
+    starting_state = idx2state_with_constant(state, Constants).astype(np.int32)
 
     robot_x, robot_y, swan_x, swan_y = starting_state
 
@@ -122,7 +163,7 @@ def process_state(state, Constants):
             # The drone has gone off the edge or hit another drone/swan, so we reset                
             a = 1
         else:
-            ending_idx = state2idx([new_robot_x, new_robot_y, swan_x, swan_y])
+            ending_idx = state2idx_with_constant([new_robot_x, new_robot_y, swan_x, swan_y], Constants)
             P[ending_idx, input] += (1 - current_prob) * (1 - Constants.SWAN_PROB)
 
     
@@ -133,9 +174,8 @@ def process_state(state, Constants):
             # The drone has gone off the edge or hit another drone/swan, so we reset
             b = 1
         else:
-            ending_idx = state2idx([new_robot_x, new_robot_y, potential_swan_move_x, potential_swan_move_y])
+            ending_idx = state2idx_with_constant([new_robot_x, new_robot_y, potential_swan_move_x, potential_swan_move_y], Constants)
             P[ending_idx, input] += (1 - current_prob) * (Constants.SWAN_PROB)
-            # print("adding 2", [new_robot_x, new_robot_y, potential_swan_move_x, potential_swan_move_y])
 
         # Case 3: Current, swan doesn't move
         new_robot_x = robot_x + control_x + w_current_x
@@ -152,9 +192,8 @@ def process_state(state, Constants):
             # The drone has gone off the edge or hit another drone/swan, so we reset        
             c = 1        
         else:
-            ending_idx = state2idx([new_robot_x, new_robot_y, swan_x, swan_y])
+            ending_idx = state2idx_with_constant([new_robot_x, new_robot_y, swan_x, swan_y], Constants)
             P[ending_idx, input] += (current_prob) * (1 - Constants.SWAN_PROB)
-            # print("adding 3", [new_robot_x, new_robot_y, swan_x, swan_y])
         
         # Case 4: Current, swan
 
@@ -164,7 +203,7 @@ def process_state(state, Constants):
             # The drone has gone off the edge or hit another drone/swan, so we reset
             d =  1
         else:
-            ending_idx = state2idx([new_robot_x, new_robot_y, potential_swan_move_x, potential_swan_move_y])
+            ending_idx = state2idx_with_constant([new_robot_x, new_robot_y, potential_swan_move_x, potential_swan_move_y], Constants)
             P[ending_idx, input] += (current_prob) * (Constants.SWAN_PROB)
         
         # Set value in case of crash:
@@ -172,7 +211,7 @@ def process_state(state, Constants):
         P[:, input].reshape((Constants.M, Constants.N, Constants.M, Constants.N), order='F')[Constants.START_POS[0], Constants.START_POS[1],:] += np.full((Constants.M, Constants.N), crash_value/(Constants.M*Constants.N-1))
 
         # Reset value where swan starts at start position
-        ending_idx = state2idx([*Constants.START_POS, *Constants.START_POS])
+        ending_idx = state2idx_with_constant([*Constants.START_POS, *Constants.START_POS], Constants)
         P[ending_idx, input] = 0
         thruster_val = Constants.INPUT_SPACE[input]
         Q[input] = Constants.TIME_COST + Constants.THRUSTER_COST*(np.sum(np.abs(thruster_val))) + crash_value*Constants.DRONE_COST
@@ -189,17 +228,17 @@ def ComputeValuesParallel(Constants) -> None:
     """
     
     global CachedConstants
-    constants_hash = hash(str(vars(Constants)))
-    if CachedConstants == constants_hash:
+    constants_to_cache = CacheableConstants(Constants)
+    if CachedConstants == constants_to_cache:
         return
-    CachedConstants = constants_hash
+    CachedConstants = constants_to_cache
 
     global P
     global Q
 
     with multiprocessing.Pool(os.cpu_count()) as cpu_pool:
 
-        results = cpu_pool.starmap(process_state, [(i, Constants) for i in range(Constants.K)])
+        results = cpu_pool.starmap(process_state, [(i, constants_to_cache) for i in range(Constants.K)])
         # TODO fill the transition probability matrix P here
         P = np.array([result[0] for result in results])
         Q = np.array([result[1] for result in results])
